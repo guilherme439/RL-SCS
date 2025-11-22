@@ -1,7 +1,3 @@
-import math
-import numpy as np
-import sys
-
 from .Terrain import Terrain
 
 class Tile(object):

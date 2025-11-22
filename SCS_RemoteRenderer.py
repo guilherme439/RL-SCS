@@ -1,9 +1,4 @@
-import pygame
-import time
 import ray
-import math
-import os
-import sys
 
 from .SCS_Renderer import *
 

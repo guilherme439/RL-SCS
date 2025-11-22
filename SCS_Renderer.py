@@ -4,9 +4,6 @@ import pygame
 import time
 import ray
 import math
-import sys
-
-from copy import copy, deepcopy
 
 from enum import Enum
 

@@ -1,24 +1,18 @@
 import math
 import numpy as np
 import torch
-import time
 import yaml
-import io
 import os
 
-from copy import copy, deepcopy
+from copy import deepcopy
 
-from enum import Enum
-from collections import Counter
 from termcolor import colored
 
-from Games.SCS.Unit import Unit
-from Games.SCS.Tile import Tile
-from Games.SCS.Terrain import Terrain
+from Unit import Unit
+from Tile import Tile
+from Terrain import Terrain
 
-from Games.SCS.SCS_Renderer import SCS_Renderer
-
-from Games.Game import Game
+from SCS_Renderer import SCS_Renderer
 
 
 '''
@@ -62,7 +56,7 @@ but I believe it makes more sense this way.
 
 '''
 
-class SCS_Game(Game):
+class SCS_Game:
 
     PHASES = 2              # Check 'update_game_env()' 
     SUB_PHASES = 4

@@ -1,0 +1,7 @@
+numpy~=1.21
+torch~=2.0
+PyYAML~=6.0
+termcolor~=2.0
+pygame~=2.1
+ray~=2.0
+
