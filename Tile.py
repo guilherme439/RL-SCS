@@ -1,4 +1,4 @@
-from .Terrain import Terrain
+from Terrain import Terrain
 
 class Tile(object):
     

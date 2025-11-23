@@ -6,6 +6,7 @@ import ray
 import math
 
 from enum import Enum
+from _utils import get_package_root
 
 
 class Color(Enum):
@@ -31,6 +32,7 @@ class SCS_Renderer():
 
     def __init__(self, remote_storage=None):
         self.game_storage = remote_storage
+        self.package_root = get_package_root()
 
         # Set the width and height of the output window, in pixels
         self.WINDOW_WIDTH = 1200
@@ -387,8 +389,8 @@ class SCS_Renderer():
 
                 # VICTORY POINTS
                 vp = tile.victory
-                p1_path = "Games/SCS/Images/blue_star.png"
-                p2_path = "Games/SCS/Images/red_star.png"
+                p1_path = str(self.package_root / "Images" / "blue_star.png")
+                p2_path = str(self.package_root / "Images" / "red_star.png")
                 if vp != 0:
                     if vp == 1:
                         star_image = pygame.image.load(p1_path)
@@ -470,7 +472,7 @@ class SCS_Renderer():
             print("You must either give a color_str(\"blue\") or color_rgb((50,23,246)) argument.\nExiting")
             exit()
 
-        image_path = "Games/SCS/Images/" + image_name + ".jpg"        
+        image_path = str(self.package_root / "Images" / f"{image_name}.jpg")
 
         #### BACKGROUND ####
         unit_image = pygame.Surface((800, 800))
@@ -534,9 +536,9 @@ class SCS_Renderer():
     def create_counter_from_base_image(self, image_name, base_unit_choice, unit_stats):
         #pygame.init()
         
-        green_image_path = "Games/SCS/Images/base_units/green_unit.jpg"
-        red_image_path = "Games/SCS/Images/base_units/red_unit.jpg"
-        blue_image_path = "Games/SCS/Images/base_units/blue_unit.jpg"
+        green_image_path = str(self.package_root / "Images" / "base_images" / "green_unit.jpg")
+        red_image_path = str(self.package_root / "Images" / "base_images" / "red_unit.jpg")
+        blue_image_path = str(self.package_root / "Images" / "base_images" / "blue_unit.jpg")
 
         (attack, defense, movement) = unit_stats
 
@@ -576,7 +578,7 @@ class SCS_Renderer():
         raw_image.blit(stats_surface, stats_rect)
         
         final_image = raw_image.copy()
-        image_path = "Games/SCS/Images/" + image_name + ".jpg"
+        image_path = str(self.package_root / "Images" / f"{image_name}.jpg")
         pygame.image.save(final_image, image_path)  
         #pygame.quit()
         return image_path
@@ -768,8 +770,8 @@ class SCS_Renderer():
 
                 # VICTORY POINTS
                 vp = tile.victory
-                p1_path = "Games/SCS/Images/blue_star.png"
-                p2_path = "Games/SCS/Images/red_star.png"
+                p1_path = str(self.package_root / "Images" / "blue_star.png")
+                p2_path = str(self.package_root / "Images" / "red_star.png")
                 if vp != 0:
                     if vp == 1:
                         star_image = pygame.image.load(p1_path)
