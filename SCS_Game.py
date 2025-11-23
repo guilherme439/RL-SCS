@@ -72,11 +72,13 @@ class SCS_Game(AECEnv):
     N_UNIT_STATUSES = 3     # Available, Moved, Attacked
     N_UNIT_STATS = 3        # Attack , Defense, Movement
 
-    def __init__(self, game_config_path="", seed=None):
+    def __init__(self, game_config_path="", seed=None, debug=False):
         
         # ------------------------------------------------------------ #
         # --------------------- INITIALIZATION  ---------------------- #
         # ------------------------------------------------------------ #
+        
+        self.debug = debug
         self.package_root = get_package_root()
 
         self.title = "Default_Game"
@@ -88,7 +90,7 @@ class SCS_Game(AECEnv):
         self.columns = 0
         self.board = []
 
-        self.agent_selection = 0
+        self.update_player(0)
         self.current_phase = 0
         self.current_sub_phase = 0
         self.current_stage = -2   
@@ -177,7 +179,9 @@ class SCS_Game(AECEnv):
         self.no_fight_limit = self.no_move_limit + self.no_fight_planes
         # Each of these limits represents the first index of the next section
 
-
+        # Action space: Discrete (flattened from 3D structure)
+        # Actions are integers 0 to num_actions-1, internally converted to (plane, row, col)
+        # This is the only space type that supports action masking in PettingZoo
         self._action_space = spaces.Discrete(self.total_action_planes * self.rows * self.columns)
 
 
@@ -250,10 +254,8 @@ class SCS_Game(AECEnv):
         
         ## PettingZoo
 
-        self.player_strings = [ f"player_{p}" for p in range(self.N_PLAYERS)]
-
-        self.agents = [ p for p in range(self.N_PLAYERS) ]
-        self.possible_agents = [ p for p in range(self.N_PLAYERS) ]
+        self.agents = [self.get_agent_name(p) for p in range(self.N_PLAYERS)]
+        self.possible_agents = [self.get_agent_name(p) for p in range(self.N_PLAYERS)]
 
         self.rewards = {}
         self._cumulative_rewards = {}
@@ -265,14 +267,14 @@ class SCS_Game(AECEnv):
         # Action masking is used to determine invalid actions at any moment
         self.observation_spaces = {}
         self.action_spaces = {}
-        for p in range(self.N_PLAYERS):
-            self.observation_spaces[p] = self._observation_space
-            self.action_spaces[p] = self._action_space
-            self.rewards[p] = 0
-            self._cumulative_rewards[p] = 0
-            self.infos[p] = {"action_mask": None}
-            self.truncations[p] = False
-            self.terminations[p] = False
+        for agent in self.agents:
+            self.observation_spaces[agent] = self._observation_space
+            self.action_spaces[agent] = self._action_space
+            self.rewards[agent] = 0
+            self._cumulative_rewards[agent] = 0
+            self.infos[agent] = {"action_mask": None}
+            self.truncations[agent] = False
+            self.terminations[agent] = False
 
         # Simulation mode simplifies the game
         # to only use absolutelly necessary properties
@@ -307,8 +309,17 @@ class SCS_Game(AECEnv):
     def getBoardRows(self):
         return self.rows    
 
+    def get_agent_name(self, player: int) -> str:
+        """Convert player index to agent name for PettingZoo API"""
+        return f"player_{player}"
+    
+    def update_player(self, player: int) -> None:
+        """Update current player and sync agent_selection"""
+        self.current_player = player
+        self.agent_selection = self.get_agent_name(player)
+
     def get_current_player(self):
-        return self.agent_selection
+        return self.current_player
     
     def get_terminal_value(self):
         return self.terminal_value
@@ -359,9 +370,6 @@ class SCS_Game(AECEnv):
     def get_player_index(self, player_string: str) -> int:
         prefix_len = 7 # "player_" has 7 letters
         return int(player_string[prefix_len:])
-    
-    def get_player_string(self, player_index: int) -> str:
-        return self.player_strings[player_index]
 
 
 ##########################################################################
@@ -370,28 +378,41 @@ class SCS_Game(AECEnv):
 # ----------------------------              ---------------------------- #
 ##########################################################################
 
-    def step(self, action_coords) -> None:
-        if not self.simulation_mode:
-            if action_coords is None:
-                return
-            action_mask = self.possible_actions().flatten()
-            index = self.get_action_index(action_coords)
-            if not action_mask[index]:
-                raise Exception("Tried to play an illegal action!")
-            
-        self.store_action(action_coords)
-        self.play_action(action_coords)
-        self.length += 1
+    def step(self, action: np.integer | None) -> None:
+        """
+        Execute an action in the environment.
         
-        # Updating the game env must be
-        # the last thing that is done
+        Args:
+            action: Integer from 0 to num_actions-1 from the Discrete action space,
+                   representing a flattened 3D coordinate (plane, row, col),
+                   or None if the agent is terminated/truncated (PettingZoo convention)
+        """
+        if self.debug:
+            print(f"[DEBUG] step() called: action={action}, agent={self.agent_selection}, terminal={self.terminal}")
+        
+        if action is not None:
+            action_coords = self.get_action_coords(action)
+            
+            if not self.simulation_mode:
+                action_mask = self.possible_actions().flatten()
+                if not action_mask[action]:
+                    raise Exception("Tried to play an illegal action!")
+                
+            self.store_action(action_coords)
+            self.play_action(action_coords) 
+            self.length += 1
+        
+        # Update game environment must be the last thing that is done
         self.update_game_env()
+        
+        if self.debug:
+            print(f"[DEBUG] step() done: terminal={self.terminal}, agent={self.agent_selection}")
         return
 
     # ----------------- ACTIONS ----------------- #
 
     def possible_actions(self):
-        player = self.agent_selection
+        player = self.current_player
         
         # PLANE DEFINITIONS
         placement_planes = np.zeros((self.placement_planes, self.rows, self.columns), dtype=np.int8)
@@ -565,10 +586,13 @@ class SCS_Game(AECEnv):
         return (act, start, stacking_lvl, dest)
 
     def play_action(self, action_coords):
+        if self.terminal:
+            return
+        
         (act, start, stacking_lvl, dest) = self.parse_action(action_coords)
 
         if (act == 0): # Placement
-            player = self.agent_selection
+            player = self.current_player
             turn = self.current_turn
             new_unit = self.current_reinforcements[player][turn].pop(0)
             new_unit.move_to(start, 0)
@@ -634,8 +658,10 @@ class SCS_Game(AECEnv):
 
 
     def reset(self, seed=None, options=None):
+        if self.debug:
+            print(f"[DEBUG] reset() called")
 
-        self.agent_selection = 0
+        self.update_player(0)
         self.current_phase = 0   
         self.current_sub_phase = 0
         self.current_stage = -2 
@@ -652,10 +678,14 @@ class SCS_Game(AECEnv):
             self.available_units[p].clear()
             self.moved_units[p].clear()
             self.attacked_units[p].clear()
-            self.rewards[p] = 0
-            self._cumulative_rewards[p] = 0
-            self.truncations[p] = False
-            self.terminations[p] = False
+            
+        self.agents = self.possible_agents.copy()
+        for agent in self.agents:
+            self.rewards[agent] = 0
+            self._cumulative_rewards[agent] = 0
+            self.truncations[agent] = False
+            self.terminations[agent] = False
+            self.infos[agent] = {"action_mask": None}
 
 
         self.current_reinforcements = deepcopy(self.all_reinforcements)
@@ -677,12 +707,41 @@ class SCS_Game(AECEnv):
         if not self.simulation_mode:
             observation = self.observe(self.agent_selection)
 
-        for p in range(self.N_PLAYERS):
-            self.infos[p]["action_mask"] = self.possible_actions().flatten()
+        for agent in self.agents:
+            self.infos[agent]["action_mask"] = self.possible_actions().flatten()
+
+        if self.debug:
+            print(f"[DEBUG] reset() done: agents={self.agents}, rewards_keys={list(self.rewards.keys())}")
 
         return observation, self.infos[self.agent_selection]
 
+    def update_petting_zoo_info(self):
+        """
+        Handle gradual agent removal - when the game is terminal
+        PettingZoo expect agents to be removed one at a time
+        """
+        if self.agent_selection in self.agents:
+            # Remove current agent from agents list and all status dicts
+            self.agents.remove(self.agent_selection)
+            self.rewards.pop(self.agent_selection, None)
+            self.terminations.pop(self.agent_selection, None)
+            self.truncations.pop(self.agent_selection, None)
+            self.infos.pop(self.agent_selection, None)
+            
+            if self.debug:
+                print(f"[DEBUG] update_petting_zoo_info() removed {self.agent_selection}, remaining: {self.agents}")
+            
+            # If there are still agents, update agent_selection to the next one
+            if len(self.agents) > 0:
+                self.agent_selection = self.agents[0]
+                if self.debug:
+                    print(f"[DEBUG] update_petting_zoo_info() next agent: {self.agent_selection}")
+
     def update_game_env(self):
+        if self.terminal:
+            self.update_petting_zoo_info()
+            return
+        
         # Two players: P1 and P2
         # Each player's turn has two phases: Movement, Fighting
         # Each phase has 2 sub-phases:
@@ -782,15 +841,17 @@ class SCS_Game(AECEnv):
         p2_stages = (-1,4,5,6,7)
 
         if stage in p1_stages:
-            self.agent_selection = 0
+            self.update_player(0)
         elif stage in p2_stages:
-            self.agent_selection = 1
+            self.update_player(1)
         else:
             raise Exception("Error in function: \'update_game_env()\'.") 
             
         if(done):
             self.terminal = True
             self.check_termination()
+            # Agent removal happens on subsequent step(None) calls
+            return
     
         # ------------------------------------    
 
@@ -823,8 +884,8 @@ class SCS_Game(AECEnv):
 
         if not self.simulation_mode:
             possible = self.possible_actions().flatten()
-            for p in range(self.N_PLAYERS):
-                self.infos[p]["action_mask"] = possible
+            for agent in self.agents:
+                self.infos[agent]["action_mask"] = possible
 
         return
     
@@ -854,6 +915,9 @@ class SCS_Game(AECEnv):
 
     def check_termination(self):
         ''' Updates terminal values and rewards '''
+        if self.debug:
+            print(f"[DEBUG] check_termination() called: agents={self.agents}, rewards_keys={list(self.rewards.keys())}")
+        
         p1_captured_points = 0
         p2_captured_points = 0
         victory_p1 = self.victory_points[0]
@@ -884,12 +948,20 @@ class SCS_Game(AECEnv):
             p2_reward = 0
         
         self.terminal_value = final_value
-        self.terminations[self.agent_selection] = 1
+        self.rewards[self.get_agent_name(0)] = p1_reward
+        self.rewards[self.get_agent_name(1)] = p2_reward
+        # Petting Zoo API
 
         # Rewards are 0 for the entire game, until the final step
         # So _cumulative_rewards will follow the same pattern
-        self.rewards = {0:p1_reward, 1:p2_reward}
-        self._cumulative_rewards = {0:p1_reward, 1:p2_reward}
+        self._cumulative_rewards[self.get_agent_name(0)] = p1_reward
+        self._cumulative_rewards[self.get_agent_name(1)] = p2_reward
+        
+        self.terminations[self.get_agent_name(0)] = True
+        self.terminations[self.get_agent_name(1)] = True
+        
+        if self.debug:
+            print(f"[DEBUG] check_termination() done: terminal={self.terminal}, terminations={self.terminations}")
 
     def get_winner(self):
         terminal_value = self.get_terminal_value()
@@ -993,7 +1065,7 @@ class SCS_Game(AECEnv):
         return
 
     def resolve_combat(self):
-        attacking_player = self.agent_selection
+        attacking_player = self.current_player
         defending_player = self.opponent(attacking_player)
         
         # DEFENSE
@@ -1327,7 +1399,8 @@ class SCS_Game(AECEnv):
         return action_i, action_coords
     
     def get_next_reinforcement(self):
-        return self.current_reinforcements[self.agent_selection][self.current_turn][0]
+        player = self.current_player
+        return self.current_reinforcements[player][self.current_turn][0]
 
     def get_action_coords(self, action_i):
         action_coords = np.unravel_index(action_i, self.get_action_space_shape())
@@ -1483,7 +1556,7 @@ class SCS_Game(AECEnv):
 
         # Player Channel #
         player_plane = torch.ones((self.rows,self.columns), dtype=data_type)
-        if self.agent_selection == 1:
+        if self.current_player == 1:
             player_plane = torch.full((self.rows,self.columns), fill_value=-1, dtype=data_type)
 
         player_plane = torch.unsqueeze(player_plane, 0)
@@ -1818,6 +1891,10 @@ class SCS_Game(AECEnv):
                 image_path = self.renderer.add_border(border_color, source_path)
 
         else:
+            # If image_path is provided but relative, make it absolute relative to package root
+            if not os.path.isabs(image_path):
+                image_path = str(self.package_root / "Images" / image_path)
+            
             if not os.path.isfile(image_path):
                 raise Exception(str(image_path) + " --> Image path provided to create unit, does not point to any file.")
 
@@ -2047,6 +2124,21 @@ class SCS_Game(AECEnv):
         observe() and state() always return the same
         '''
         return self.state()
+    
+    def last(self, observe=True):
+        """
+        Returns observation, cumulative_reward, terminated, truncated, info for the current agent
+        This is required by the PettingZoo AEC API
+        """
+        agent = self.agent_selection
+        observation = self.observe(agent) if observe else None
+        return (
+            observation,
+            self._cumulative_rewards[agent],
+            self.terminations[agent],
+            self.truncations[agent],
+            self.infos[agent]
+        )
     
     def close(self):
         return
