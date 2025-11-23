@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "RL-SCS"
+version = "0.1.0"
+description = "A reinforcement learning implementation for Standard Combat Series (SCS) - a hexagonal tile-based strategy game"
+readme = "README.md"
+requires-python = ">=3.8"
+dynamic = ["dependencies"]
+
+[project.optional-dependencies]
+dev = []
+
+[tool.setuptools]
+py-modules = [
+    "SCS_Game",
+    "SCS_Renderer",
+    "SCS_RemoteRenderer",
+    "Terrain",
+    "Tile",
+    "Unit",
+    "CounterCreator",
+]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
