@@ -1,4 +1,3 @@
-
 '''
 from enum import Enum
 class Unit_Status(Enum):
@@ -17,7 +16,7 @@ class Unit(object):
     attack = 0
     defense = 0
 
-    image_path = "SCS/Images/default_unit.webp"
+    image_path = ""
 
 
     def __init__(self, name, attack, defense, mov_allowance, player, arraival_locations, image_path):

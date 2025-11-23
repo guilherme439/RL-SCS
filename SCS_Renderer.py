@@ -139,11 +139,11 @@ class SCS_Renderer():
                             debug_actions = True
 
             # Uses the action_history to replay the game since it is deterministic
-            render_game.reset_env()
+            render_game.reset()
             for i in range(action_index):
                 action = game.action_history[i]
                 last_player = render_game.get_current_player()
-                render_game.step_function(action)
+                render_game.step(action)
             
 
             if debug_state:
@@ -172,8 +172,10 @@ class SCS_Renderer():
                     action_color = Color.RED.rgb()
                     
 
-            winner_text = ":-)"
-            if len(render_game.action_history) == len(game.action_history):
+            played_actions = len(render_game.action_history)
+            total_actions = len(game.action_history)
+            winner_text = f"{played_actions} | {total_actions}"
+            if played_actions == total_actions:
                 winner = game.get_winner()
                 if winner == 0:
                     winner_text = "Draw!"
@@ -472,7 +474,7 @@ class SCS_Renderer():
             print("You must either give a color_str(\"blue\") or color_rgb((50,23,246)) argument.\nExiting")
             exit()
 
-        image_path = str(self.package_root / "Images" / f"{image_name}.jpg")
+        image_path = str(self.package_root / "Images" / f"{image_name}.jpg")        
 
         #### BACKGROUND ####
         unit_image = pygame.Surface((800, 800))

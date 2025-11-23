@@ -9,7 +9,7 @@ class Terrain():
     # Movement costs
     cost = 0
 
-    image_path = "SCS/Images/dirt.jpg"
+    image_path = ""
     
     def __init__(self, attack_modifier, defense_modifier, cost, name="", image_path=""):
         
