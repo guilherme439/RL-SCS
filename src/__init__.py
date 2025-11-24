@@ -1,8 +1,3 @@
-"""
-RL-SCS: Reinforcement Learning for Standard Combat Series
-
-A PettingZoo-compatible environment for turn-based strategy games.
-"""
 
 from .SCS_Game import SCS_Game
 from .SCS_Renderer import SCS_Renderer

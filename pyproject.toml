@@ -3,7 +3,7 @@ requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "RL-SCS"
+name = "rl-scs"
 version = "0.1.0"
 description = "A reinforcement learning implementation for Standard Combat Series (SCS) - a hexagonal tile-based strategy game"
 readme = "README.md"
@@ -14,10 +14,31 @@ dynamic = ["dependencies"]
 dev = []
 
 [tool.setuptools]
-packages = ["src"]
+packages = ["rl_scs"]
+package-dir = {"rl_scs" = "src"}
 
 [tool.setuptools.package-data]
-src = ["**/*.yml", "**/*.yaml"]
+rl_scs = ["**/*.yml", "**/*.yaml"]
 
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}
+
+[tool.pytest.ini_options]
+testpaths = ["src/tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+pythonpath = ["."]
+addopts = [
+    "-v",
+    "--tb=short",
+    "--strict-markers",
+]
+filterwarnings = [
+    "ignore:Agent's maximum observation space value is infinity:UserWarning",
+    "ignore:Environment has not defined a render\\(\\) method:UserWarning",
+]
+markers = [
+    "api: PettingZoo API compliance tests",
+    "stress: Long-running stress tests (2000 cycles)",
+]

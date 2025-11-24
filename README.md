@@ -1,8 +1,9 @@
 # RL-SCS
 
-A reinforcement learning implementation for Standard Combat Series (SCS) - a hexagonal tile-based strategy game.
+A simplified implementation of Standard Combat Series (SCS) games for reinforcement learning. 
 
 **PettingZoo AEC API Compatible** ✅
+
 
 ## Installation
 
@@ -38,7 +39,7 @@ pip install -r requirements-dev.txt
 
 ```
 RL-SCS/
-├── src/                            # Package root
+├── src/                         # Package root
 │   ├── SCS_Game.py                # Main game environment (PettingZoo AEC)
 │   ├── SCS_Renderer.py            # Rendering logic
 │   ├── Terrain.py                 # Terrain definitions
@@ -46,8 +47,7 @@ RL-SCS/
 │   ├── Unit.py                    # Game units
 │   ├── _utils.py                  # Internal utilities
 │   ├── tests/                     # Test suite
-│   │   ├── test_pettingzoo.py    # Standard API tests
-│   │   ├── test_comprehensive.py # Multi-config tests
+│   │   ├── test_pettingzoo.py    # API compliance tests
 │   │   └── test_stress.py         # Stress tests
 │   ├── assets/                    # Game assets (images, etc.)
 │   └── example_configurations/    # Game configuration files
