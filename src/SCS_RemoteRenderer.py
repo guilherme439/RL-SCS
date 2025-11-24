@@ -1,6 +1,6 @@
 import ray
 
-from SCS_Renderer import *
+from .SCS_Renderer import *
 
 
 @ray.remote

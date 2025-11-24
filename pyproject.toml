@@ -14,17 +14,10 @@ dynamic = ["dependencies"]
 dev = []
 
 [tool.setuptools]
-py-modules = [
-    "SCS_Game",
-    "SCS_Renderer",
-    "SCS_RemoteRenderer",
-    "Terrain",
-    "Tile",
-    "Unit",
-    "CounterCreator",
-    "_utils",
-]
+packages = ["src"]
+
+[tool.setuptools.package-data]
+src = ["**/*.yml", "**/*.yaml"]
 
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}
-

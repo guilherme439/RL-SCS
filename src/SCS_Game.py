@@ -10,12 +10,12 @@ from copy import deepcopy
 
 from termcolor import colored
 
-from Unit import Unit
-from Tile import Tile
-from Terrain import Terrain
+from .Unit import Unit
+from .Tile import Tile
+from .Terrain import Terrain
 
-from SCS_Renderer import SCS_Renderer
-from _utils import get_package_root
+from .SCS_Renderer import SCS_Renderer
+from ._utils import get_package_root
 
 from pettingzoo import AECEnv
 
@@ -1871,7 +1871,7 @@ class SCS_Game(AECEnv):
         image_path = unit_details.get("image_path")
         if image_path is None:
             image_name = "p" + str(player) + "_" + name
-            image_path = str(self.package_root / "Images" / f"{image_name}.jpg")
+            image_path = str(self.package_root / "assets" / f"{image_name}.jpg")
             if not os.path.isfile(image_path):
                 print("No image path provided")
                 print("Automatically creating image for unit.")
@@ -1893,7 +1893,7 @@ class SCS_Game(AECEnv):
         else:
             # If image_path is provided but relative, make it absolute relative to package root
             if not os.path.isabs(image_path):
-                image_path = str(self.package_root / "Images" / image_path)
+                image_path = str(self.package_root / "assets" / image_path)
             
             if not os.path.isfile(image_path):
                 raise Exception(str(image_path) + " --> Image path provided to create unit, does not point to any file.")
