@@ -35,43 +35,15 @@ For development:
 pip install -r requirements-dev.txt
 ```
 
-## Project Structure
-
-```
-RL-SCS/
-├── src/                         # Package root
-│   ├── SCS_Game.py                # Main game environment (PettingZoo AEC)
-│   ├── SCS_Renderer.py            # Rendering logic
-│   ├── Terrain.py                 # Terrain definitions
-│   ├── Tile.py                    # Board tiles
-│   ├── Unit.py                    # Game units
-│   ├── _utils.py                  # Internal utilities
-│   ├── tests/                     # Test suite
-│   │   ├── test_pettingzoo.py    # API compliance tests
-│   │   └── test_stress.py         # Stress tests
-│   ├── assets/                    # Game assets (images, etc.)
-│   └── example_configurations/    # Game configuration files
-├── requirements.txt               # Core dependencies
-└── requirements-dev.txt           # Development dependencies
-```
-
-## Usage
-
-
 ## Development
 
 ### Running Tests During Development
 
 
 # Run tests
+```
 pytest
 ```
 
 
-## License
 
-[Add your license here]
-
-## Contributors
-
-[Add contributors here]

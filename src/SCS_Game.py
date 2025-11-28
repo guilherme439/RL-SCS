@@ -1,24 +1,20 @@
 import math
+import os
+from copy import deepcopy
+from typing import Literal
+
 import numpy as np
 import torch
 import yaml
-import os
-
 from gymnasium import spaces
-
-from copy import deepcopy
-
+from pettingzoo import AECEnv
 from termcolor import colored
 
-from .Unit import Unit
-from .Tile import Tile
-from .Terrain import Terrain
-
-from .SCS_Renderer import SCS_Renderer
 from ._utils import get_package_root
-
-from pettingzoo import AECEnv
-
+from .SCS_Renderer import SCS_Renderer
+from .Terrain import Terrain
+from .Tile import Tile
+from .Unit import Unit
 
 '''
 From the hexagly source code: This is how the board is converted
@@ -72,13 +68,22 @@ class SCS_Game(AECEnv):
     N_UNIT_STATUSES = 3     # Available, Moved, Attacked
     N_UNIT_STATS = 3        # Attack , Defense, Movement
 
-    def __init__(self, game_config_path="", seed=None, debug=False):
+    def __init__(
+        self,
+        game_config_path: str = "",
+        seed: int | None = None,
+        debug: bool = False,
+        action_mask_location: Literal["info", "obs"] = "info",
+        obs_space_format: Literal["channels_first", "channels_last", "flat"] = "channels_last",
+    ):
         
         # ------------------------------------------------------------ #
         # --------------------- INITIALIZATION  ---------------------- #
         # ------------------------------------------------------------ #
         
         self.debug = debug
+        self.action_mask_location = action_mask_location
+        self.obs_space_format = obs_space_format
         self.package_root = get_package_root()
 
         self.title = "Default_Game"
@@ -238,17 +243,34 @@ class SCS_Game(AECEnv):
         self.n_terrain_channels + \
         self.n_attack_channels
 
-        self.game_state_shape = (self.total_dims, self.rows, self.columns)
+        # State shape depends on obs_space_format:
+        # - channels_first: (C, H, W) - PyTorch convention
+        # - channels_last: (H, W, C) - TensorFlow/RLlib convention
+        # - flat: (C * H * W,) - 1D flattened, works with FC networks
+        if self.obs_space_format == "channels_first":
+            self.game_state_shape = (self.total_dims, self.rows, self.columns)
+        elif self.obs_space_format == "channels_last":
+            self.game_state_shape = (self.rows, self.columns, self.total_dims)
+        else:  # flat
+            self.game_state_shape = (self.total_dims * self.rows * self.columns,)
 
-        self._observation_space = spaces.Box(
-        low=-1,                           # Minimum value (-1 for player channels)
-        high=np.inf,                      # Maximum value (infinity for unit stats and terrain)
-        shape=self.game_state_shape,      # (total_dims, rows, columns)
-        dtype=np.float32                  # Using float32 to handle continuous values
+        self._state_space = spaces.Box(
+            low=-1,                           # Minimum value (-1 for player channels)
+            high=np.inf,                      # Maximum value (infinity for unit stats and terrain)
+            shape=self.game_state_shape,
+            dtype=np.float32                  # Using float32 to handle continuous values
         )
-        # In reality the observation space isn't this large,
-        # but it is implemented like this so that it works well
-        # within the PettingZoo ecosystem.
+        
+        # Observation space depends on action_mask_location:
+        # - "info": observation is just the state Box (action mask in info dict)
+        # - "obs": observation is a Dict with state and action mask
+        if self.action_mask_location == "obs":
+            self._observation_space = spaces.Dict({
+                "observation": self._state_space,
+                "action_mask": spaces.MultiBinary(self.num_actions)
+            })
+        else:  # "info"
+            self._observation_space = self._state_space
 
 
         
@@ -386,21 +408,27 @@ class SCS_Game(AECEnv):
             action: Integer from 0 to num_actions-1 from the Discrete action space,
                    representing a flattened 3D coordinate (plane, row, col),
                    or None if the agent is terminated/truncated (PettingZoo convention)
+        
+        If an invalid action is played (for some reason), the offending player immediately loses. 
         """
         if self.debug:
             print(f"[DEBUG] step() called: action={action}, agent={self.agent_selection}, terminal={self.terminal}")
         
         if action is not None:
-            action_coords = self.get_action_coords(action)
-            
+            is_valid: bool = True
             if not self.simulation_mode:
-                action_mask = self.possible_actions().flatten()
-                if not action_mask[action]:
-                    raise Exception("Tried to play an illegal action!")
-                
-            self.store_action(action_coords)
-            self.play_action(action_coords) 
-            self.length += 1
+                action_mask: np.ndarray = self.possible_actions().flatten()
+                is_valid = bool(action_mask[action])
+                if not is_valid:
+                    if self.debug:
+                        print(f"[DEBUG] Invalid action {action} by player {self.current_player}")
+                    self.terminate_invalid_action(self.current_player)
+            
+            if is_valid:
+                action_coords: tuple[int, int, int] = self.get_action_coords(action)
+                self.store_action(action_coords)
+                self.play_action(action_coords) 
+                self.length += 1
         
         # Update game environment must be the last thing that is done
         self.update_game_env()
@@ -703,17 +731,14 @@ class SCS_Game(AECEnv):
 
         self.update_game_env()
 
-        observation = None
-        if not self.simulation_mode:
-            observation = self.observe(self.agent_selection)
-
+        action_mask = self.possible_actions().flatten()
         for agent in self.agents:
-            self.infos[agent]["action_mask"] = self.possible_actions().flatten()
+            self.infos[agent]["action_mask"] = action_mask
 
         if self.debug:
             print(f"[DEBUG] reset() done: agents={self.agents}, rewards_keys={list(self.rewards.keys())}")
 
-        return observation, self.infos[self.agent_selection]
+        return None
 
     def update_petting_zoo_info(self):
         """
@@ -849,7 +874,7 @@ class SCS_Game(AECEnv):
             
         if(done):
             self.terminal = True
-            self.check_termination()
+            self.evaluate_termination()
             # Agent removal happens on subsequent step(None) calls
             return
     
@@ -913,10 +938,42 @@ class SCS_Game(AECEnv):
 
         return  
 
-    def check_termination(self):
+    def terminate_invalid_action(self, offending_player: int) -> None:
+        if self.debug:
+            print(f"[DEBUG] terminate_invalid_action() called: offending_player={offending_player}")
+        
+        self.terminal = True
+        self._evaluate_invalid_action_termination(offending_player)
+        
+        if self.debug:
+            print(f"[DEBUG] terminate_invalid_action() done: terminal_value={self.terminal_value}")
+
+    def _evaluate_invalid_action_termination(self, offending_player: int) -> None:
+        ''' 
+            Update terminal values and rewards for when a player makes an invalid action.
+            The offending player immediately loses the game.
+        '''
+        if offending_player == 0:
+            self.terminal_value = -1  # Player 1 wins
+            p1_reward: int = -1
+            p2_reward: int = 1
+        else:
+            self.terminal_value = 1   # Player 0 wins
+            p1_reward = 1
+            p2_reward = -1
+        
+        self.rewards[self.get_agent_name(0)] = p1_reward
+        self.rewards[self.get_agent_name(1)] = p2_reward
+        self._cumulative_rewards[self.get_agent_name(0)] = p1_reward
+        self._cumulative_rewards[self.get_agent_name(1)] = p2_reward
+        
+        self.terminations[self.get_agent_name(0)] = True
+        self.terminations[self.get_agent_name(1)] = True
+
+    def evaluate_termination(self) -> None:
         ''' Updates terminal values and rewards '''
         if self.debug:
-            print(f"[DEBUG] check_termination() called: agents={self.agents}, rewards_keys={list(self.rewards.keys())}")
+            print(f"[DEBUG] evaluate_termination() called: agents={self.agents}, rewards_keys={list(self.rewards.keys())}")
         
         p1_captured_points = 0
         p2_captured_points = 0
@@ -961,7 +1018,7 @@ class SCS_Game(AECEnv):
         self.terminations[self.get_agent_name(1)] = True
         
         if self.debug:
-            print(f"[DEBUG] check_termination() done: terminal={self.terminal}, terminations={self.terminations}")
+            print(f"[DEBUG] evaluate_termination() done: terminal={self.terminal}, terminations={self.terminations}")
 
     def get_winner(self):
         terminal_value = self.get_terminal_value()
@@ -1402,7 +1459,7 @@ class SCS_Game(AECEnv):
         player = self.current_player
         return self.current_reinforcements[player][self.current_turn][0]
 
-    def get_action_coords(self, action_i):
+    def get_action_coords(self, action_i: np.integer):
         action_coords = np.unravel_index(action_i, self.get_action_space_shape())
         return action_coords
     
@@ -2114,16 +2171,39 @@ class SCS_Game(AECEnv):
 # -------------------------     PettingZoo     ------------------------- #
 ##########################################################################
     
-    def state(self):
-        ''' PettingZoo expects the state to be a numpy array '''
-        return self.generate_state().numpy()
+    def state(self) -> np.ndarray:
+        '''
+        PettingZoo expects the state to be a numpy array.
+        
+        Returns state in format determined by obs_space_format:
+        - channels_first: (C, H, W) - PyTorch convention
+        - channels_last: (H, W, C) - TensorFlow/RLlib convention
+        - flat: (C * H * W,) - 1D flattened
+        '''
+        state = self.generate_state().numpy()
+        if self.obs_space_format == "channels_last":
+            # Transpose from (C, H, W) to (H, W, C)
+            state = np.transpose(state, (1, 2, 0))
+        elif self.obs_space_format == "flat":
+            state = state.flatten()
+        return state
 
-    def observe(self, agent):
+    def observe(self, agent: str) -> np.ndarray | dict:
         '''
         Since the game is fully observable,
-        observe() and state() always return the same
+        the entire game state will always be observed by both agents.
+        
+        Returns observation in format determined by action_mask_location:
+        - "info": returns just the state array (action mask is in info dict)
+        - "obs": returns dict with "observation" and "action_mask" keys
         '''
-        return self.state()
+        if self.action_mask_location == "obs":
+            return {
+                "observation": self.state(),
+                "action_mask": self.infos[agent]["action_mask"]
+            }
+        else:  # "info"
+            return self.state()
     
     def last(self, observe=True):
         """
