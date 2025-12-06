@@ -1,38 +1,32 @@
+from __future__ import annotations
+from typing import TYPE_CHECKING
+
 import os
-os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
-import pygame
 import time
-import ray
 import math
+import numpy as np
+import pygame
+import ray
 
-from enum import Enum
-from ._utils import get_package_root
+os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
 
-
-class Color(Enum):
-    WHITE = (255, 255, 255)
-    BAD_PINK = (255, 0, 255)
-    YELLOW = (245, 200, 0)
-    ORANGE = (200, 100, 0)
-    RED = (200, 0, 0)
-    DARK_RED = (90, 10, 25)
-    BROWN = (90, 50, 0)
-    DARK_GREEN = (60, 80, 40)
-    GREEN = (45, 120, 5)
-    LIGHT_BLUE = (40, 110, 230)
-    BLUE = (0, 40, 90)
-    BLACK = (0, 0, 0)
-    LIGHT_BROWN = (143, 100, 46)
-
-    def rgb(self):
-        return self.value
+from termcolor import colored
+from .Color import Color
+from .CounterCreator import CounterCreator
+from src.utils.package_utils import get_package_root
 
 
-class SCS_Renderer():
+if TYPE_CHECKING:
+    from src.SCS_Game import SCS_Game
+    from src.Tile import Tile
+
+class SCS_Renderer:
 
     def __init__(self, remote_storage=None):
+        self.counter_creator = CounterCreator()
         self.game_storage = remote_storage
         self.package_root = get_package_root()
+        self.screen = None
 
         # Set the width and height of the output window, in pixels
         self.WINDOW_WIDTH = 1200
@@ -46,12 +40,42 @@ class SCS_Renderer():
         pygame.font.init()
         pygame.scrap.init()
 
+    def close(self):
+        if self.screen is not None:
+            pygame.display.quit()
+            self.screen = None
+
+    def render_frame(self, game: SCS_Game, mode="human"):
+        self.initialize_pygame()
+
+        if mode == "human":
+            if self.screen is None:
+                self.screen = pygame.display.set_mode([self.WINDOW_WIDTH, self.WINDOW_HEIGHT])
+            surface = self.screen
+        elif mode == "rgb_array":
+            surface = pygame.Surface((self.WINDOW_WIDTH, self.WINDOW_HEIGHT))
+        elif mode == "ansi":
+            return self.string_representation(game)
+        else:
+            raise ValueError(f"Unsupported render mode: {mode}")
+
+        surface.fill(Color.WHITE.rgb())
+        self.render_board_hexagons(surface, game)
+
+        if mode == "human":
+            pygame.display.flip()
+            return None
+
+        frame = pygame.surfarray.array3d(surface)
+        frame = np.transpose(frame, (1, 0, 2))
+        return frame
+
     # Passively render a game while it is being played, using a remote storage for communication
-    def render(self):
+    def passive_render(self):
         self.initialize_pygame()
 
         # A remote game storage is used to update the game being displayed
-        game = ray.get(self.game_storage.get.remote())
+        game: SCS_Game = ray.get(self.game_storage.get.remote())
 
         # Set up the drawing window
         screen = pygame.display.set_mode([self.WINDOW_WIDTH, self.WINDOW_HEIGHT])
@@ -61,7 +85,7 @@ class SCS_Renderer():
         running=True
         while running:
 
-            game = ray.get(self.game_storage.get.remote())
+            game: SCS_Game = ray.get(self.game_storage.get.remote())
             
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
@@ -99,12 +123,98 @@ class SCS_Renderer():
         # Done! Time to quit.
         pygame.quit()
         return
-    
+
+    def string_representation(self, game: SCS_Game) -> str:
+        string = ""
+        string += "\n ====="
+        for k in range(game.columns):
+            string += "==="
+        string += "==\n"
+
+        first_line_numbers = "\n     "
+        top = "\n     "
+        for k in range(game.columns):
+            first_line_numbers += (format(k+1, '02') + " ")
+            odd_col = k % 2
+            top += "   " if odd_col else "__ "
+
+        string += first_line_numbers
+        string += (top + "\n")
+
+        for i in range(game.rows):
+            first_line = "    "
+            second_line = format(i+1, '02') + "  "
+            for j in range(game.columns):
+                tile: Tile = game.board[i][j]
+                mark_text = "  "
+                mark_color = "white"
+                attributes = []
+
+                if tile.victory == 1:
+                    mark_color = "cyan"
+                    mark_text = " *"
+                elif tile.victory == 2:
+                    mark_color = "yellow"
+                    mark_text = " *"
+
+                s = tile.stacking_number()
+                if s > 0:
+                    number = str(s)
+                    if s > 9:
+                        number = "X"
+                    mark_text = "U" + number
+
+                    if tile.player == 1:
+                        if mark_color == "white":
+                            mark_color = "blue"
+                        elif mark_color == "yellow":
+                            mark_color = "green"
+                    else:
+                        if mark_color == "white":
+                            mark_color = "red"
+                        if mark_color == "cyan":
+                            mark_color = "magenta"
+                            attributes = ["dark"]
+
+                mark = colored(mark_text, mark_color, attrs=attributes)
+
+                first_row = (i == 0)
+                last_col = (j == (game.columns - 1))
+                odd_col = j % 2
+                if odd_col:
+                    first_line += '__'
+                    second_line += mark
+                    if last_col:
+                        if not first_row:
+                            first_line += "/"
+                        second_line += "\\"
+
+                else:
+                    first_line += "/" + mark + "\\"
+                    second_line += r"\__/"
+
+            string += (first_line + "\n")
+            string += (second_line + "\n")
+
+        bottom = "     "
+        for k in range(game.columns):
+            odd_col = k % 2
+            bottom += r"\__/" if odd_col else "  "
+
+        string += (bottom + "\n")
+
+        string += "\n ====="
+        for k in range(game.columns):
+            string += "==="
+        string += "==\n"
+
+        return string
+
     # Interactively render an already played game using arrow keys
-    def analyse(self, game):
+    def analyse(self, game: SCS_Game):
         self.initialize_pygame()
 
-        render_game = game.clone() # scratch game for rendering
+        render_game: SCS_Game = game.clone() # scratch game for rendering
         
         # Set up the drawing window
         screen = pygame.display.set_mode([self.WINDOW_WIDTH, self.WINDOW_HEIGHT])
@@ -213,7 +323,6 @@ class SCS_Renderer():
             # Limit fps
             time.sleep(0.2)
         
-        # Done! Time to quit.
         pygame.quit()
         return
 
@@ -251,8 +360,12 @@ class SCS_Renderer():
 # ----------------- AUXILIARY METHODS ------------------ #
 # ------------------------------------------------------ #
 
-    def render_board_hexagons(self, screen, game, debug=[]):
-
+    def render_board_hexagons(
+        self,
+        screen: pygame.Surface,
+        game: SCS_Game,
+        debug=[]
+    ):
         if len(debug) > 0:
             values, positions = list(zip(*debug))
 
@@ -439,168 +552,9 @@ class SCS_Renderer():
 # -------------------- UNIT IMAGES --------------------- #
 # ------------------------------------------------------ #
 
-    def color_str_to_rgb(self, color_str):
-        # There must be a better way of doing this
-
-        match color_str:
-            case "green":
-                rgb = Color.GREEN.rgb()
-            case "dark_green":
-                rgb = Color.DARK_GREEN.rgb()
-            case "red":
-                rgb = Color.RED.rgb()
-            case "dark_red":
-                rgb = Color.DARK_RED.rgb()
-            case "blue":
-                rgb = Color.BLUE.rgb()
-            case "black":
-                rgb = Color.BLACK.rgb()
-            case "light_blue":
-                rgb = Color.LIGHT_BLUE.rgb()
-            case _:
-                print("Unknown color choice.\nExiting")
-                exit()
-
-        return rgb
+    
  
-    def create_counter_from_scratch(self, image_name, unit_stats, unit_type, color_str=None, color_rgb=None):
-        #pygame.init()
-
-        if color_rgb is not None:
-            image_color = color_rgb
-        elif color_str is not None:
-            image_color = self.color_str_to_rgb(color_str)
-        else:
-            print("You must either give a color_str(\"blue\") or color_rgb((50,23,246)) argument.\nExiting")
-            exit()
-
-        image_path = str(self.package_root / "assets" / f"{image_name}.jpg")        
-
-        #### BACKGROUND ####
-        unit_image = pygame.Surface((800, 800))
-        unit_image.fill(image_color)
-
-
-        #### SYMBOL ####
-        unit_symbol_position = (220, 150)
-        unit_symbol_dimensions = (360, 200)
-
-        unit_symbol_rect = pygame.draw.rect(unit_image, Color.BLACK.rgb(),[unit_symbol_position, unit_symbol_dimensions], 16)
-        symbol_center = unit_symbol_rect.center
-
-        match unit_type:
-            case "infantary":
-                line_thickness = 8
-                margin = line_thickness // 2
-
-                top_left = (unit_symbol_rect.topleft[0]+margin, unit_symbol_rect.topleft[1]+margin)
-                top_right = (unit_symbol_rect.topright[0]-margin, unit_symbol_rect.topright[1]+margin)
-                bottom_left = (unit_symbol_rect.bottomleft[0]+margin, unit_symbol_rect.bottomleft[1]-margin)
-                bottom_right = (unit_symbol_rect.bottomright[0]-margin, unit_symbol_rect.bottomright[1]-margin)
-                # We needed to make the lines shorter by a certain margin so that they dont overflow outside the rectangle
-                pygame.draw.line(unit_image, Color.BLACK.rgb(), top_left, bottom_right, line_thickness)
-                pygame.draw.line(unit_image, Color.BLACK.rgb(), top_right, bottom_left, line_thickness)
-
-            case "mechanized":
-                line_thickness = 8
-                elipse_dims = ( unit_symbol_dimensions[0]*0.6, unit_symbol_dimensions[1]*0.6)
-                elipse_rect = pygame.Rect((0,0), elipse_dims)
-                elipse_rect.center = symbol_center
-                pygame.draw.ellipse(unit_image, Color.BLACK.rgb(), elipse_rect, line_thickness)
-
-            case _:
-                print("Unregonized type.\nExiting")
-                exit()
-
-
-        #### STATS ####
-        unit_stats_position = (140, 450)
-        unit_stats_dimensions = (520, 220)
-
-        (attack, defense, movement) = unit_stats
-
-        stats_area_rect = pygame.draw.rect(unit_image, Color.YELLOW.rgb(), [unit_stats_position, unit_stats_dimensions])
-        stats_area_w = stats_area_rect.width
-        stats_area_h = stats_area_rect.height
-
-        stats_text = str(attack) + " - "  + str(defense) + " - "  + str(movement)
-        stats_font = pygame.font.SysFont("uroob", 200)
-        stats_surface = stats_font.render(stats_text, True, Color.BLACK.rgb())
-        stats_surface = pygame.transform.scale(stats_surface, (0.75*stats_area_w, 1.1*stats_area_h))
-        stats_rect = stats_surface.get_rect(center=stats_area_rect.center)
-        stats_rect.y += 30
-        unit_image.blit(stats_surface, stats_rect)     
     
-        pygame.image.save(unit_image, image_path)
-        #pygame.quit()
-        return image_path
-    
-    def create_counter_from_base_image(self, image_name, base_unit_choice, unit_stats):
-        #pygame.init()
-        
-        green_image_path = str(self.package_root / "assets" / "base_images" / "green_unit.jpg")
-        red_image_path = str(self.package_root / "assets" / "base_images" / "red_unit.jpg")
-        blue_image_path = str(self.package_root / "assets" / "base_images" / "blue_unit.jpg")
-
-        (attack, defense, movement) = unit_stats
-
-        match base_unit_choice:
-            case "green":
-                raw_image_path = green_image_path
-                rectangle_position = (48, 338)
-                rectangle_dims = (540, 225)
-            case "red":
-                raw_image_path = red_image_path
-                rectangle_position = (45, 365)
-                rectangle_dims = (584, 244)
-            case "blue":
-                print("blue base image not implemented yet.")
-                raw_image_path = red_image_path
-                rectangle_position = (45, 365)
-                rectangle_dims = (584, 244)
-
-            case _:
-                print("Unknown image choice.\nExiting")
-                exit()
-            
-
-        raw_image = pygame.image.load(raw_image_path)
-        (width, height) = raw_image.get_size()
-
-        stats_area_rect = pygame.draw.rect(raw_image, Color.YELLOW.rgb(), [rectangle_position, rectangle_dims])
-        stats_area_w = stats_area_rect.width
-        stats_area_h = stats_area_rect.height
-
-        stats_text = str(attack) + " - "  + str(defense) + " - "  + str(movement)
-        stats_font = pygame.font.SysFont("uroob", 200)
-        stats_surface = stats_font.render(stats_text, True, Color.BLACK.rgb())
-        stats_surface = pygame.transform.scale(stats_surface, (0.75*stats_area_w, 1.1*stats_area_h))
-        stats_rect = stats_surface.get_rect(center=stats_area_rect.center)
-        stats_rect.y += 30
-        raw_image.blit(stats_surface, stats_rect)
-        
-        final_image = raw_image.copy()
-        image_path = str(self.package_root / "assets" / f"{image_name}.jpg")
-        pygame.image.save(final_image, image_path)  
-        #pygame.quit()
-        return image_path
-
-    def add_border(self, color_str, source_path, dest_path=""):
-        #pygame.init()
-        border_color = self.color_str_to_rgb(color_str)
-
-        if dest_path == "":
-            dest_path = source_path
-
-        final_image = pygame.image.load(source_path)
-
-        (width, height) = final_image.get_size()
-        border_thickness = int(0.04 * height)
-        pygame.draw.rect(final_image, border_color, [0, 0, width, height], border_thickness)
-
-        pygame.image.save(final_image, dest_path) 
-        #pygame.quit()
-        return dest_path
   
 
 # ------------------------------------------------------ #
@@ -743,7 +697,7 @@ class SCS_Renderer():
                 tile_rect = pygame.Rect(tile_position, tile_dimensions)
                 pygame.draw.rect(screen, Color.BLACK.rgb(), tile_rect, tile_border_width)
 
-                tile = board[i][j]
+                tile: Tile = board[i][j]
 
 
                 # TERRAIN
@@ -832,7 +786,7 @@ class SCS_Renderer():
 
             screen.fill(Color.WHITE.rgb())
     
-            self.render_board(screen, render_game, debug=values_list)
+            self.render_board_hexagons(screen, render_game, debug=values_list)
 
 
             title_text = "SCS Value Debug"

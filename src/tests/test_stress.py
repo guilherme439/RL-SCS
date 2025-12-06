@@ -1,10 +1,9 @@
-"""Stress testing with multiple runs and different seeds using multiprocessing"""
 import pytest
 import random
 from multiprocessing import Pool, cpu_count
 
 from .base_test import BaseTest
-from .. import SCS_Game
+from src.SCS_Game import SCS_Game
 
 
 def run_stress_cycles(args):
@@ -54,7 +53,6 @@ def run_stress_cycles(args):
 
 
 class TestStress(BaseTest):
-    """Stress test environment with multiple runs using parallel workers"""
     
     @pytest.mark.stress
     @pytest.mark.parametrize("config_name", BaseTest.configs)

@@ -10,13 +10,13 @@ from gymnasium import spaces
 from pettingzoo import AECEnv
 from termcolor import colored
 
-from ._utils import get_package_root
-from .SCS_Renderer import SCS_Renderer
+from src.utils.package_utils import get_package_root
+from src.render.SCS_Renderer import SCS_Renderer
 from .Terrain import Terrain
 from .Tile import Tile
 from .Unit import Unit
 
-'''
+r'''
 From the hexagly source code: This is how the board is converted
 from hexagonal to ortogonal representation:
 
@@ -34,7 +34,7 @@ from hexagonal to ortogonal representation:
 
 '''
 
-'''
+r'''
 This is how rows and collumns are defined for SCS Games.
 This definition might be different from the examples in the hexagdly repository,
 but I believe it makes more sense this way.
@@ -141,10 +141,10 @@ class SCS_Game(AECEnv):
         # If a config is not provided we can not initialize any further
         if game_config_path == "":
             return
-        
+
         self.load_game_from_config(game_config_path, seed)
 
-
+    
         # ------------------------------------------------------- #
         # ---------- STATE AND ACTION REPRESENTATIONS ----------- #
         # ------------------------------------------------------- #
@@ -414,6 +414,14 @@ class SCS_Game(AECEnv):
         if self.debug:
             print(f"[DEBUG] step() called: action={action}, agent={self.agent_selection}, terminal={self.terminal}")
         
+        agent = self.agent_selection
+        
+        if self.terminations.get(agent, False) or self.truncations.get(agent, False):
+            self._was_dead_step(action)
+            return
+        
+        self._cumulative_rewards[agent] = 0
+        
         if action is not None:
             is_valid: bool = True
             if not self.simulation_mode:
@@ -430,7 +438,6 @@ class SCS_Game(AECEnv):
                 self.play_action(action_coords) 
                 self.length += 1
         
-        # Update game environment must be the last thing that is done
         self.update_game_env()
         
         if self.debug:
@@ -461,7 +468,7 @@ class SCS_Game(AECEnv):
             next_reinforcement = self.get_next_reinforcement()
             arraival_locations = next_reinforcement.get_arraival_locations()
             for (row, col) in arraival_locations:
-                tile = self.board[row][col]
+                tile: Tile = self.board[row][col]
                 # can not place on tiles controlled by the other player or that are already full.
                 if not ( (tile.player == self.opponent(player)) or (tile.stacking_number() == self.stacking_limit) ):
                     placement_planes[0][row][col] = 1       
@@ -740,33 +747,20 @@ class SCS_Game(AECEnv):
 
         return None
 
-    def update_petting_zoo_info(self):
-        """
-        Handle gradual agent removal - when the game is terminal
-        PettingZoo expect agents to be removed one at a time
-        """
-        if self.agent_selection in self.agents:
-            # Remove current agent from agents list and all status dicts
-            self.agents.remove(self.agent_selection)
-            self.rewards.pop(self.agent_selection, None)
-            self.terminations.pop(self.agent_selection, None)
-            self.truncations.pop(self.agent_selection, None)
-            self.infos.pop(self.agent_selection, None)
-            
-            if self.debug:
-                print(f"[DEBUG] update_petting_zoo_info() removed {self.agent_selection}, remaining: {self.agents}")
-            
-            # If there are still agents, update agent_selection to the next one
-            if len(self.agents) > 0:
-                self.agent_selection = self.agents[0]
-                if self.debug:
-                    print(f"[DEBUG] update_petting_zoo_info() next agent: {self.agent_selection}")
-
     def update_game_env(self):
-        if self.terminal:
-            self.update_petting_zoo_info()
-            return
-        
+        if not self.terminal:
+            self.update_env_stages()
+            self.update_env_player()
+
+            if not self.simulation_mode:
+                possible = self.possible_actions().flatten()
+                for agent in self.agents:
+                    self.infos[agent]["action_mask"] = possible
+
+        self._accumulate_rewards()
+        return
+
+    def update_env_stages(self):
         # Two players: P1 and P2
         # Each player's turn has two phases: Movement, Fighting
         # Each phase has 2 sub-phases:
@@ -861,25 +855,7 @@ class SCS_Game(AECEnv):
                         continue
             break
 
-
-        p1_stages = (-2,0,1,2,3)
-        p2_stages = (-1,4,5,6,7)
-
-        if stage in p1_stages:
-            self.update_player(0)
-        elif stage in p2_stages:
-            self.update_player(1)
-        else:
-            raise Exception("Error in function: \'update_game_env()\'.") 
-            
-        if(done):
-            self.terminal = True
-            self.evaluate_termination()
-            # Agent removal happens on subsequent step(None) calls
-            return
-    
         # ------------------------------------    
-
 
         reinforcement_stages = self.reinforcement_stages()
         movement_stages = self.movement_stages()
@@ -897,7 +873,6 @@ class SCS_Game(AECEnv):
         else:
             raise Exception("Error in function: \'update_game_env()\'.")
 
-        
         if self.current_sub_phase in (0,1):
             self.current_phase = 0
         elif self.current_sub_phase in (2,3):
@@ -907,13 +882,23 @@ class SCS_Game(AECEnv):
 
         self.current_stage = stage
 
-        if not self.simulation_mode:
-            possible = self.possible_actions().flatten()
-            for agent in self.agents:
-                self.infos[agent]["action_mask"] = possible
+        if(done):
+            self.terminal = True
+            self.evaluate_termination()
 
         return
     
+    def update_env_player(self):
+        p1_stages = (-2,0,1,2,3)
+        p2_stages = (-1,4,5,6,7)
+        if self.current_stage in p1_stages:
+            self.update_player(0)
+        elif self.current_stage in p2_stages:
+            self.update_player(1)
+        else:
+            raise Exception("Error in function: \'update_game_env()\'.")
+        return
+
     def reinforcement_stages(self):
         return (-2,-1,0,4)
     
@@ -964,14 +949,11 @@ class SCS_Game(AECEnv):
         
         self.rewards[self.get_agent_name(0)] = p1_reward
         self.rewards[self.get_agent_name(1)] = p2_reward
-        self._cumulative_rewards[self.get_agent_name(0)] = p1_reward
-        self._cumulative_rewards[self.get_agent_name(1)] = p2_reward
         
         self.terminations[self.get_agent_name(0)] = True
         self.terminations[self.get_agent_name(1)] = True
 
     def evaluate_termination(self) -> None:
-        ''' Updates terminal values and rewards '''
         if self.debug:
             print(f"[DEBUG] evaluate_termination() called: agents={self.agents}, rewards_keys={list(self.rewards.keys())}")
         
@@ -1007,12 +989,6 @@ class SCS_Game(AECEnv):
         self.terminal_value = final_value
         self.rewards[self.get_agent_name(0)] = p1_reward
         self.rewards[self.get_agent_name(1)] = p2_reward
-        # Petting Zoo API
-
-        # Rewards are 0 for the entire game, until the final step
-        # So _cumulative_rewards will follow the same pattern
-        self._cumulative_rewards[self.get_agent_name(0)] = p1_reward
-        self._cumulative_rewards[self.get_agent_name(1)] = p2_reward
         
         self.terminations[self.get_agent_name(0)] = True
         self.terminations[self.get_agent_name(1)] = True
@@ -1051,7 +1027,7 @@ class SCS_Game(AECEnv):
     def player_confirmed_attack(self, player):
         return (self.target_tile is None)      
 
-    def end_movement(self, unit):
+    def end_movement(self, unit: Unit):
         # End movement
         unit.set_status(1)
         player_idx = unit.player
@@ -1066,43 +1042,11 @@ class SCS_Game(AECEnv):
         if len(enemy_units) == 0:
             self.end_fighting(unit)
 
-    def end_fighting(self, unit):
+    def end_fighting(self, unit: Unit):
         unit.set_status(2)
         player_idx = unit.player
         self.attacked_units[player_idx].append(unit)
         self.moved_units[player_idx].remove(unit)
-
-    def set_simple_game_state(self, turn, unit_ids_list, unit_position_list, player_list):
-        self.lenght = 0 # artificial game states don't have previous actions
-
-        if len(unit_ids_list) != len(unit_position_list) or len(unit_ids_list) != len(player_list):
-            raise Exception("set_simple_game_state()\nAll lists must have the same length.")
-
-        # Create the units and place them at the specified position
-        for i in range(len(unit_ids_list)):
-            unit_id = unit_ids_list[i]
-            position = unit_position_list[i]
-            player = player_list[i] - 1
-            player_index = player
-
-            unit_details = self.units_by_id[unit_id]
-            new_unit = self.create_unit(unit_details, player)
-
-            new_unit.move_to(position, 0)
-            self.available_units[player_index].append(new_unit)
-            tile = self.get_tile(position)
-            tile.place_unit(new_unit)
-
-        # Clear the reinforcements for the previous turns
-        for reinforcements in self.current_reinforcements.values():
-            for t in range(turn+1):
-                reinforcements[t].clear()
-            
-        # Set the turn and make sure the environment is updated
-        self.current_turn = turn
-        self.current_stage = 0
-        self.update_game_env()
-        return
         
     # ------------------ COMBAT ------------------ #
     
@@ -1175,7 +1119,7 @@ class SCS_Game(AECEnv):
     def check_tiles(self, coords):
         ''' Clock-wise rotation order '''
 
-        '''
+        r'''
              n
         nw   __   ne
             /  \ 
@@ -1466,6 +1410,113 @@ class SCS_Game(AECEnv):
     def get_action_index(self, action_coords):
         action_i = np.ravel_multi_index(action_coords, self.get_action_space_shape())
         return action_i 
+
+    def string_action(self, action_coords):
+
+        parsed_action = self.parse_action(action_coords)
+        act = parsed_action[0]
+        start = parsed_action[1]
+        stacking_lvl = parsed_action[2]
+        dest = parsed_action[3]
+
+        string = ""
+        if (act == 0): # placement
+            string = "Movement phase: Placing reinforcement "
+        
+            string = string + "at (" + str(start[0]+1) + "," + str(start[1]+1) + ")"
+
+        elif (act == 1): # movement
+            string = "Movement phase: Moving from (" + str(start[0]+1) + "," + str(start[1]+1) + ") " + "to (" + str(dest[0]+1) + "," + str(dest[1]+1) + ")"
+        
+        elif (act == 2): # choose target
+            string = "Fighting phase: Targeting the tile at (" + str(start[0]+1) + "," + str(start[1]+1) + ")"
+
+        elif (act == 3): # choose attacker
+            string = "Fighting phase: Chose the unit in tile (" + str(start[0]+1) + "," + str(start[1]+1) + ") at stacking level:" + str(stacking_lvl) + ", to join the attack"
+
+        elif (act == 4): # confirm attack
+            string = "Fighting phase: Attack to tile (" + str(start[0]+1) + "," + str(start[1]+1) + ") confirmed"
+
+        elif (act == 5): # no move
+            string = "Movement phase: Unit at (" + str(start[0]+1) + "," + str(start[1]+1) + ") " + "chose not to move"
+
+        elif (act == 6): # no fight
+            string = "Fighting phase: Unit at (" + str(start[0]+1) + "," + str(start[1]+1) + ") " + "chose not to fight"
+
+        else:
+            string = "Unknown action..."
+
+        #print(string)
+        return string
+    
+    def print_possible_actions(self):
+        possible_actions = self.possible_actions()
+        action_indexes = list(zip(*np.nonzero(possible_actions)))
+
+        for action in action_indexes:
+            print(self.string_action(action))
+
+
+##########################################################################
+# ----------------------------             ----------------------------- #
+# --------------------------    PettingZoo    -------------------------- #
+# ----------------------------             ----------------------------- #
+##########################################################################
+    
+    def state(self) -> np.ndarray:
+        '''
+        PettingZoo expects the state to be a numpy array.
+        
+        Returns state in format determined by obs_space_format:
+        - channels_first: (C, H, W) - PyTorch convention
+        - channels_last: (H, W, C) - TensorFlow/RLlib convention
+        - flat: (C * H * W,) - 1D flattened
+        '''
+        state = self.generate_state().numpy()
+        if self.obs_space_format == "channels_last":
+            # Transpose from (C, H, W) to (H, W, C)
+            state = np.transpose(state, (1, 2, 0))
+        elif self.obs_space_format == "flat":
+            state = state.flatten()
+        return state
+
+    def observe(self, agent: str) -> np.ndarray | dict:
+        '''
+        Since the game is fully observable,
+        the entire game state will always be observed by both agents.
+        
+        Returns observation in format determined by action_mask_location:
+        - "info": returns just the state array (action mask is in info dict)
+        - "obs": returns dict with "observation" and "action_mask" keys
+        '''
+        if self.action_mask_location == "obs":
+            return {
+                "observation": self.state(),
+                "action_mask": self.infos[agent]["action_mask"]
+            }
+        else:  # "info"
+            return self.state()
+    
+    def last(self, observe=True):
+        """
+        Returns observation, cumulative_reward, terminated, truncated, info for the current agent
+        This is required by the PettingZoo AEC API
+        """
+        agent = self.agent_selection
+        observation = self.observe(agent) if observe else None
+        return (
+            observation,
+            self._cumulative_rewards[agent],
+            self.terminations[agent],
+            self.truncations[agent],
+            self.infos[agent]
+        )
+    
+    def render(self, mode: Literal["human", "rbg_array", "ansi"]):
+        return self.renderer.render_frame(self, mode=mode)
+
+    def close(self):
+        self.renderer.close()
     
 ##########################################################################
 # -------------------------                   -------------------------- #
@@ -1654,6 +1705,41 @@ class SCS_Game(AECEnv):
 
         target = (value_target, policy_target)
         return target
+        
+
+    # --------  DEBUG  -------- #
+
+    def set_simple_game_state(self, turn, unit_ids_list, unit_position_list, player_list):
+        self.lenght = 0 # artificial game states don't have previous actions
+
+        if len(unit_ids_list) != len(unit_position_list) or len(unit_ids_list) != len(player_list):
+            raise Exception("set_simple_game_state()\nAll lists must have the same length.")
+
+        # Create the units and place them at the specified position
+        for i in range(len(unit_ids_list)):
+            unit_id = unit_ids_list[i]
+            position = unit_position_list[i]
+            player = player_list[i] - 1
+            player_index = player
+
+            unit_details = self.units_by_id[unit_id]
+            new_unit = self.create_unit(unit_details, player)
+
+            new_unit.move_to(position, 0)
+            self.available_units[player_index].append(new_unit)
+            tile = self.get_tile(position)
+            tile.place_unit(new_unit)
+
+        # Clear the reinforcements for the previous turns
+        for reinforcements in self.current_reinforcements.values():
+            for t in range(turn+1):
+                reinforcements[t].clear()
+            
+        # Set the turn and make sure the environment is updated
+        self.current_turn = turn
+        self.current_stage = 0
+        self.update_game_env()
+        return
 
     def debug_state_image(self, state_image):
         print("\n")
@@ -1944,8 +2030,13 @@ class SCS_Game(AECEnv):
                 else:
                     raise Exception("Found Unknown player when creating unit.")
                     
-                source_path = self.renderer.create_counter_from_scratch(image_name, stats, "infantary", color_str=color_str)
-                image_path = self.renderer.add_border(border_color, source_path)
+                source_path = self.renderer.counter_creator.create_counter_from_scratch(
+                    image_name,
+                    stats,
+                    "infantary",
+                    color_str=color_str
+                )
+                image_path = self.renderer.counter_creator.add_border(border_color, source_path)
 
         else:
             # If image_path is provided but relative, make it absolute relative to package root
@@ -1959,266 +2050,5 @@ class SCS_Game(AECEnv):
         new_unit = Unit(name, attack, defense, mov_allowance, player, [], image_path)
         return new_unit
 
-##########################################################################
-# ----------------------                         ----------------------- #
-# ----------------------  REPRESENTATION METHODS  ---------------------- #
-# ----------------------                         ----------------------- #
-##########################################################################
-
-    def string_representation(self):
-        string = ""
-        # Horizontal line
-        string += "\n ====="
-        for k in range(self.columns):
-            string += "==="
-        string += "==\n"
-
-        # Collumn numbers and top
-        first_line_numbers = "\n     "
-        top = "\n     "
-        for k in range(self.columns):
-            first_line_numbers += (format(k+1, '02') + " ")
-            odd_col = k%2
-            if odd_col:
-                top += "   "
-            else:
-                top += "__ "
-
-        string += first_line_numbers
-        string += (top + "\n")
-
-        for i in range(self.rows):
-            first_line = "    "
-            second_line = format(i+1, '02') + "  "
-            for j in range(self.columns):
-                tile = self.board[i][j]
-                mark = "  "
-                mark_text = "  "
-                mark_color = "white"
-                attributes=[]
-
-                if tile.victory == 1:
-                    mark_color = "cyan"
-                    mark_text = " *"
-                elif tile.victory == 2:
-                    mark_color = "yellow"
-                    mark_text = " *"
-
-                s = tile.stacking_number()
-                if s > 0:
-                    number = str(s)
-                    if s>9:
-                        number = "X"
-                    mark_text = "U" + number
-                    
-                    if tile.player == 1:
-                        if mark_color == "white":
-                            mark_color = "blue"
-                        elif mark_color == "yellow":
-                            mark_color = "green"
-                    else:
-                        if mark_color == "white":
-                            mark_color = "red"
-                        if mark_color == "cyan":
-                            mark_color = "magenta"
-                            attributes=["dark"]
-
-                mark = colored(mark_text, mark_color, attrs=attributes)
-
-                first_row = (i == 0)
-                last_col = (j == (self.columns - 1))
-                odd_col = j%2
-                if odd_col:
-                    first_line += '__'
-                    second_line += mark
-                    if last_col:
-                        if not first_row:
-                            first_line += "/"
-                        second_line += "\\"
-
-                else:
-                    first_line += "/" + mark + "\\"
-                    second_line += "\__/"
-                       
-
-            string += (first_line + "\n")
-            string += (second_line + "\n")
-
-        # Bottom
-        bottom = "     "
-        for k in range(self.columns):
-            odd_col = k%2
-            if odd_col:
-                bottom += "\__/"
-            else:
-                bottom += "  "
-
-        string += (bottom + "\n")
-
-        # Horizontal line
-        string += "\n ====="
-        for k in range(self.columns):
-            string += "==="
-        string += "==\n"
-
-        return string
-
-    def string_action(self, action_coords):
-
-        parsed_action = self.parse_action(action_coords)
-
-        act = parsed_action[0]
-        start = parsed_action[1]
-        stacking_lvl = parsed_action[2]
-        dest = parsed_action[3]
-
-        string = ""
-        if (act == 0): # placement
-            string = "Movement phase: Placing reinforcement "
-        
-            string = string + "at (" + str(start[0]+1) + "," + str(start[1]+1) + ")"
-
-        elif (act == 1): # movement
-            string = "Movement phase: Moving from (" + str(start[0]+1) + "," + str(start[1]+1) + ") " + "to (" + str(dest[0]+1) + "," + str(dest[1]+1) + ")"
-        
-        elif (act == 2): # choose target
-            string = "Fighting phase: Targeting the tile at (" + str(start[0]+1) + "," + str(start[1]+1) + ")"
-
-        elif (act == 3): # choose attacker
-            string = "Fighting phase: Chose the unit in tile (" + str(start[0]+1) + "," + str(start[1]+1) + ") at stacking level:" + str(stacking_lvl) + ", to join the attack"
-
-        elif (act == 4): # confirm attack
-            string = "Fighting phase: Attack to tile (" + str(start[0]+1) + "," + str(start[1]+1) + ") confirmed"
-
-        elif (act == 5): # no move
-            string = "Movement phase: Unit at (" + str(start[0]+1) + "," + str(start[1]+1) + ") " + "chose not to move"
-
-        elif (act == 6): # no fight
-            string = "Fighting phase: Unit at (" + str(start[0]+1) + "," + str(start[1]+1) + ") " + "chose not to fight"
-
-        else:
-            string = "Unknown action..."
-
-        #print(string)
-        return string
-    
-    def print_possible_actions(self):
-        possible_actions = self.possible_actions()
-        action_indexes = list(zip(*np.nonzero(possible_actions)))
-
-        for action in action_indexes:
-            print(self.string_action(action))
 
 
-##########################################################################
-# -------------------------                    ------------------------- #
-# ------------------------    LEGACY METHODS    ------------------------ #
-# -------------------------                    ------------------------- #
-##########################################################################
-
-    def string_squared_representation(self):
-        print("string representation for squared boards")
-
-        string = "\n   "
-        for k in range(self.columns):
-            string += (" " + format(k+1, '02') + " ")
-        
-        string += "\n  |"
-        for k in range(self.columns-1):
-            string += "---|"
-
-        string += "---|\n"
-
-        for i in range(self.rows):
-            string += format(i+1, '02') + "| "
-            for j in range(self.columns):
-                mark = " "
-                if self.board[i][j].victory == 1:
-                    mark = colored("V", "cyan")
-                elif self.board[i][j].victory == 2:
-                    mark = colored("V", "yellow")
-
-                for unit in self.board[i][j].units:    
-                    if unit.player == 1:
-                        mark=colored("U", "blue")
-                    else:
-                        mark=colored("U", "red")
-
-                string += mark + ' | '
-            string += "\n"
-
-            if(i<self.rows-1):
-                string += "  |"
-                for k in range(self.columns-1):
-                    string += "---|"
-                string += "---|\n"
-            else:
-                string += "   "
-                for k in range(self.columns-1):
-                    string += "--- "
-                string += "--- \n"
-
-        string += "=="
-        for k in range(self.columns):
-            string += "===="
-        string += "==\n"
-
-        return string
-    
-
-
-##########################################################################
-# -------------------------     PettingZoo     ------------------------- #
-##########################################################################
-    
-    def state(self) -> np.ndarray:
-        '''
-        PettingZoo expects the state to be a numpy array.
-        
-        Returns state in format determined by obs_space_format:
-        - channels_first: (C, H, W) - PyTorch convention
-        - channels_last: (H, W, C) - TensorFlow/RLlib convention
-        - flat: (C * H * W,) - 1D flattened
-        '''
-        state = self.generate_state().numpy()
-        if self.obs_space_format == "channels_last":
-            # Transpose from (C, H, W) to (H, W, C)
-            state = np.transpose(state, (1, 2, 0))
-        elif self.obs_space_format == "flat":
-            state = state.flatten()
-        return state
-
-    def observe(self, agent: str) -> np.ndarray | dict:
-        '''
-        Since the game is fully observable,
-        the entire game state will always be observed by both agents.
-        
-        Returns observation in format determined by action_mask_location:
-        - "info": returns just the state array (action mask is in info dict)
-        - "obs": returns dict with "observation" and "action_mask" keys
-        '''
-        if self.action_mask_location == "obs":
-            return {
-                "observation": self.state(),
-                "action_mask": self.infos[agent]["action_mask"]
-            }
-        else:  # "info"
-            return self.state()
-    
-    def last(self, observe=True):
-        """
-        Returns observation, cumulative_reward, terminated, truncated, info for the current agent
-        This is required by the PettingZoo AEC API
-        """
-        agent = self.agent_selection
-        observation = self.observe(agent) if observe else None
-        return (
-            observation,
-            self._cumulative_rewards[agent],
-            self.terminations[agent],
-            self.truncations[agent],
-            self.infos[agent]
-        )
-    
-    def close(self):
-        return

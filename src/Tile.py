@@ -3,7 +3,7 @@ from .Terrain import Terrain
 class Tile(object):
     
 
-    def __init__(self, position, terrain=None):
+    def __init__(self, position, terrain: Terrain = None):
         self.victory = 0            # Integer identifing if the tile is a victory point for either player
         self.terrain = terrain      # Terrain present on the tile
         self.units = []             # List of units in the tile

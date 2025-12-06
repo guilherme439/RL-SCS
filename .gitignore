@@ -6,6 +6,9 @@ __pycache__/
 .Python
 *.pkl
 
+# pytest
+.pytest_cache
+
 # Packaging
 build/
 dist/
@@ -19,6 +22,7 @@ ENV/
 
 # IDE
 .vscode/
+.windsurf/
 .idea/
 *.swp
 *.swo
