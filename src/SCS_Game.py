@@ -8,10 +8,9 @@ import torch
 import yaml
 from gymnasium import spaces
 from pettingzoo import AECEnv
-from termcolor import colored
 
-from src.utils.package_utils import get_package_root
-from src.render.SCS_Renderer import SCS_Renderer
+from .utils.package_utils import get_package_root
+from .render.SCS_Renderer import SCS_Renderer
 from .Terrain import Terrain
 from .Tile import Tile
 from .Unit import Unit

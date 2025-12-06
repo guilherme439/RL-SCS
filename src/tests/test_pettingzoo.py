@@ -3,7 +3,7 @@ import pytest
 from pettingzoo.test import api_test
 
 from .base_test import BaseTest
-from src.SCS_Game import SCS_Game
+from ..SCS_Game import SCS_Game
 
 
 class TestPettingZoo(BaseTest):

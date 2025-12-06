@@ -1,4 +1,4 @@
-from src.utils.package_utils import get_package_root
+from ..utils.package_utils import get_package_root
 from .Color import Color
 import pygame
 

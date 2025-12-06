@@ -13,12 +13,12 @@ os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
 from termcolor import colored
 from .Color import Color
 from .CounterCreator import CounterCreator
-from src.utils.package_utils import get_package_root
+from ..utils.package_utils import get_package_root
 
 
 if TYPE_CHECKING:
-    from src.SCS_Game import SCS_Game
-    from src.Tile import Tile
+    from ..SCS_Game import SCS_Game
+    from ..Tile import Tile
 
 class SCS_Renderer:
 

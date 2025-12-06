@@ -5,4 +5,3 @@ termcolor~=2.0
 pygame~=2.1
 gymnasium~=1.1
 pettingzoo~=1.25
-setuptools<81
