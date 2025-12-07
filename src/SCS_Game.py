@@ -76,10 +76,6 @@ class SCS_Game(AECEnv):
         obs_space_format: Literal["channels_first", "channels_last", "flat"] = "channels_last",
     ):
         
-        # ------------------------------------------------------------ #
-        # --------------------- INITIALIZATION  ---------------------- #
-        # ------------------------------------------------------------ #
-        
         self.debug = debug
         self.action_mask_location = action_mask_location
         self.obs_space_format = obs_space_format
@@ -134,7 +130,7 @@ class SCS_Game(AECEnv):
         self.action_history = []
 
         # ------------------------------------------------------ #
-        # --------------- GAME ENVIORNMENT --------------- #
+        # -----------------  GAME ENVIORNMENT  ----------------- #
         # ------------------------------------------------------ #
 
         # If a config is not provided we can not initialize any further
@@ -695,6 +691,13 @@ class SCS_Game(AECEnv):
         if self.debug:
             print(f"[DEBUG] reset() called")
 
+        if seed is not None:
+            np.random.seed(seed)
+
+        options = options or {}
+        regenerate_map = options.get("regenerate_map", True)
+        regenerate_vp = options.get("regenerate_vp", True)
+
         self.update_player(0)
         self.current_phase = 0   
         self.current_sub_phase = 0
@@ -721,14 +724,20 @@ class SCS_Game(AECEnv):
             self.terminations[agent] = False
             self.infos[agent] = {"action_mask": None}
 
-
         self.current_reinforcements = deepcopy(self.all_reinforcements)
         
-        for i in range(self.rows):
-            for j in range(self.columns):
-                self.board[i][j].reset() # reset each tile    
-
+        should_regen_map = regenerate_map and self._is_map_randomized()
+        should_regen_vp = regenerate_vp and self._is_vp_randomized()
         
+        if should_regen_map:
+            self._generate_map()
+        else:
+            self._reset_tiles()
+        
+        if should_regen_vp:
+            self._clear_victory_points()
+            self._generate_victory_points()
+
         # MCTS RELATED ATRIBUTES 
         self.child_policy.clear()
         self.state_history.clear()
@@ -1884,110 +1893,137 @@ class SCS_Game(AECEnv):
                             defense_modifier=properties["defense_modifier"],
                             cost=properties["cost"], 
                             name=properties["name"],
-                            image_path=properties["image_path"])
+                            image_path=properties.get("image_path")
+                        )
                         
                         properties["instance"] = instance
                         self.terrain_types.append(instance)
 
-                    method = values["creation_method"]
-                    if method == "Randomized":
-                        if values.get("distribution"):
-                            distribution = values["distribution"]
-                        else:
-                            num_terrains = len(self.terrain_by_id)
-                            distribution = [1/num_terrains for _ in range(num_terrains)]
-
-                        for i in range(self.rows):
-                            self.board.append([])
-                            for j in range(self.columns):
-                                terrain = np.random.choice(self.terrain_types, p=distribution)
-                                self.board[i].append(Tile((i,j), terrain))
-
-                    elif method == "Detailed":
-                        map_configuration = values["map_configuration"]
-                        map_shape = np.shape(map_configuration)
-                        if map_shape != (self.rows, self.columns):
-                            raise Exception("Wrong shape for map configuration, when loading game config.")
-                        else:
-                            for i in range(self.rows):
-                                self.board.append([])
-                                for j in range(self.columns):
-                                    terrain_id = map_configuration[i][j]
-                                    terrain = self.terrain_by_id[terrain_id]["instance"]
-                                    self.board[i].append(Tile((i,j), terrain))
-                    else:
-                        raise Exception("Unrecognized map creation method, when loading game config.")
+                    self._map_config = values
+                    self._generate_map()
 
                 case "Victory_points":
-                    method = values["creation_method"]
+                    self._vp_config = values
+                    self._generate_victory_points()
 
-                    if method == "Randomized":
-                        p1_vp = values["number_vp"]["p1"]
-                        p2_vp = values["number_vp"]["p2"]
-                        self.victory_points = [[],[]]        
+    def _generate_map(self) -> None:
+        method = self._map_config["creation_method"]
+        
+        if method == "Randomized":
+            distribution = self._map_config.get("distribution")
+            if distribution is None:
+                num_terrains = len(self.terrain_by_id)
+                distribution = [1/num_terrains for _ in range(num_terrains)]
 
-                        p1_available_tiles = self.rows * (self.p1_last_index+1)
-                        p2_available_tiles = self.rows * ((self.columns - (self.p2_first_index+1)) + 1)
-                        if p1_vp > p1_available_tiles:
-                            raise Exception("Game config has too many victory points for p1.")
-                        
-                        if p2_vp > p2_available_tiles:
-                            raise Exception("Game config has too many victory points for p2.")
+            self.board = []
+            for i in range(self.rows):
+                self.board.append([])
+                for j in range(self.columns):
+                    terrain = np.random.choice(self.terrain_types, p=distribution)
+                    self.board[i].append(Tile((i,j), terrain))
 
-                        for _ in range(p1_vp):
-                            row = np.random.choice(range(self.rows))
-                            col = np.random.choice(range(self.p1_last_index+1))
-                            point = (row, col)
-                            while point in self.victory_points[0]:
-                                row = np.random.choice(range(self.rows))
-                                col = np.random.choice(range(self.p1_last_index+1))
-                                point = (row, col)
+        elif method == "Detailed":
+            map_configuration = self._map_config["map_configuration"]
+            map_shape = np.shape(map_configuration)
+            if map_shape != (self.rows, self.columns):
+                raise Exception("Wrong shape for map configuration, when loading game config.")
+            
+            self.board = []
+            for i in range(self.rows):
+                self.board.append([])
+                for j in range(self.columns):
+                    terrain_id = map_configuration[i][j]
+                    terrain = self.terrain_by_id[terrain_id]["instance"]
+                    self.board[i].append(Tile((i,j), terrain))
+        else:
+            raise Exception("Unrecognized map creation method, when loading game config.")
 
-                            self.victory_points[0].append(point)
-                        
-                        for _ in range(p2_vp):
-                            row = np.random.choice(range(self.rows))
-                            col = np.random.choice(range(self.p2_first_index, self.columns))
-                            point = (row, col)
-                            while point in self.victory_points[1]:
-                                row = np.random.choice(range(self.rows))
-                                col = np.random.choice(range(self.p2_first_index, self.columns))
-                                point = (row, col)
+    def _generate_victory_points(self) -> None:
+        method = self._vp_config["creation_method"]
 
-                            self.victory_points[1].append(point)
+        if method == "Randomized":
+            p1_vp = self._vp_config["number_vp"]["p1"]
+            p2_vp = self._vp_config["number_vp"]["p2"]
+            self.victory_points = [[],[]]        
 
+            p1_available_tiles = self.rows * (self.p1_last_index+1)
+            p2_available_tiles = self.rows * ((self.columns - (self.p2_first_index+1)) + 1)
+            if p1_vp > p1_available_tiles:
+                raise Exception("Game config has too many victory points for p1.")
+            
+            if p2_vp > p2_available_tiles:
+                raise Exception("Game config has too many victory points for p2.")
 
-                    elif method == "Detailed":
-                        p1_vp = values["vp_locations"]["p1"]
-                        p2_vp = values["vp_locations"]["p2"]
-                        self.victory_points = [[],[]]        
+            for _ in range(p1_vp):
+                row = np.random.choice(range(self.rows))
+                col = np.random.choice(range(self.p1_last_index+1))
+                point = (row, col)
+                while point in self.victory_points[0]:
+                    row = np.random.choice(range(self.rows))
+                    col = np.random.choice(range(self.p1_last_index+1))
+                    point = (row, col)
 
-                        loaded_vps = [p1_vp, p2_vp]
-                        for player in range(len(loaded_vps)):
-                            loaded_list = loaded_vps[player]
-                            game_list = self.victory_points[player]
-                            for point in loaded_list:
-                                if len(point) != 2:
-                                    raise Exception(str(point) + " --> Points must have two coordenates. (game config)")
+                self.victory_points[0].append(point)
+            
+            for _ in range(p2_vp):
+                row = np.random.choice(range(self.rows))
+                col = np.random.choice(range(self.p2_first_index, self.columns))
+                point = (row, col)
+                while point in self.victory_points[1]:
+                    row = np.random.choice(range(self.rows))
+                    col = np.random.choice(range(self.p2_first_index, self.columns))
+                    point = (row, col)
+
+                self.victory_points[1].append(point)
+
+        elif method == "Detailed":
+            p1_vp = self._vp_config["vp_locations"]["p1"]
+            p2_vp = self._vp_config["vp_locations"]["p2"]
+            self.victory_points = [[],[]]        
+
+            loaded_vps = [p1_vp, p2_vp]
+            for player in range(len(loaded_vps)):
+                loaded_list = loaded_vps[player]
+                game_list = self.victory_points[player]
+                for point in loaded_list:
+                    if len(point) != 2:
+                        raise Exception(str(point) + " --> Points must have two coordenates. (game config)")
                                     
-                                elif point in game_list:
-                                    raise Exception(str(point) + " --> Repeated point. Cannot have two points with the same coordenates. (game config)")
+                    elif point in game_list:
+                        raise Exception(str(point) + " --> Repeated point. Cannot have two points with the same coordenates. (game config)")
                                     
-                                else:
-                                    vp_tuple = (point[0], point[1])
-                                    game_list.append(vp_tuple)        
-
                     else:
-                        raise Exception("Unrecognized victory points creation method. (game config)")
+                        vp_tuple = (point[0], point[1])
+                        game_list.append(vp_tuple)        
 
-                    self.n_vp = [0, 0]
-                    for point in self.victory_points[0]:
-                        self.board[point[0]][point[1]].victory = 1
-                        self.n_vp[0] += 1
+        else:
+            raise Exception("Unrecognized victory points creation method. (game config)")
 
-                    for point in self.victory_points[1]:
-                        self.board[point[0]][point[1]].victory = 2
-                        self.n_vp[1] += 1
+        self.n_vp = [0, 0]
+        for point in self.victory_points[0]:
+            self.board[point[0]][point[1]].victory = 1
+            self.n_vp[0] += 1
+
+        for point in self.victory_points[1]:
+            self.board[point[0]][point[1]].victory = 2
+            self.n_vp[1] += 1
+
+    def _reset_tiles(self) -> None:
+        for i in range(self.rows):
+            for j in range(self.columns):
+                self.board[i][j].reset()
+
+    def _clear_victory_points(self) -> None:
+        for point in self.victory_points[0]:
+            self.board[point[0]][point[1]].victory = 0
+        for point in self.victory_points[1]:
+            self.board[point[0]][point[1]].victory = 0
+
+    def _is_map_randomized(self) -> bool:
+        return hasattr(self, '_map_config') and self._map_config.get("creation_method") == "Randomized"
+
+    def _is_vp_randomized(self) -> bool:
+        return hasattr(self, '_vp_config') and self._vp_config.get("creation_method") == "Randomized"
 
     def clone(self):
         return deepcopy(self)
