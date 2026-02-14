@@ -22,6 +22,7 @@ rl_scs = ["**/*.yml", "**/*.yaml"]
 
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}
+optional-dependencies.dev = {file = ["requirements-dev.txt"]}
 
 [tool.pytest.ini_options]
 testpaths = ["src/tests"]

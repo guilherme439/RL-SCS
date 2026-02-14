@@ -27,12 +27,12 @@ source venv/bin/activate
 
 For regular use:
 ```bash
-pip install -r requirements.txt
+pip install -e .
 ```
 
 For development:
 ```bash
-pip install -r requirements-dev.txt
+pip install -e .[dev]
 ```
 
 ## Development
