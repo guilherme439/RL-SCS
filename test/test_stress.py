@@ -3,7 +3,7 @@ import random
 from multiprocessing import Pool, cpu_count
 
 from .base_test import BaseTest
-from ..SCS_Game import SCS_Game
+from rl_scs.SCS_Game import SCS_Game
 
 
 def run_stress_cycles(args):

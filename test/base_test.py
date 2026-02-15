@@ -1,4 +1,4 @@
-from ..utils.package_utils import get_package_root
+from rl_scs.utils.package_utils import get_package_root
 
 
 class BaseTest:
