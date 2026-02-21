@@ -6,7 +6,6 @@ import time
 import math
 import numpy as np
 import pygame
-import ray
 
 os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
 
@@ -36,9 +35,7 @@ class SCS_Renderer:
         
     def initialize_pygame(self):
         pygame.display.init()
-        pygame.fastevent.init()
         pygame.font.init()
-        pygame.scrap.init()
 
     def close(self):
         if self.screen is not None:
@@ -70,59 +67,6 @@ class SCS_Renderer:
         frame = np.transpose(frame, (1, 0, 2))
         return frame
 
-    # Passively render a game while it is being played, using a remote storage for communication
-    def passive_render(self):
-        self.initialize_pygame()
-
-        # A remote game storage is used to update the game being displayed
-        game: SCS_Game = ray.get(self.game_storage.get.remote())
-
-        # Set up the drawing window
-        screen = pygame.display.set_mode([self.WINDOW_WIDTH, self.WINDOW_HEIGHT])
-
-        time.sleep(0.2)
-        # Run until user closes window
-        running=True
-        while running:
-
-            game: SCS_Game = ray.get(self.game_storage.get.remote())
-            
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    running=False
-            if game.is_terminal():
-                running=False
-
-            # Fill the background with white
-            screen.fill(Color.WHITE.rgb())
-
-            self.render_board_hexagons(screen, game)
-
-            text = "SCS Board live rendering!"
-            if len(game.action_history) > 0:
-                last_action = game.action_history[-1]
-                text = game.string_action(last_action)
-
-
-            text_font = pygame.font.SysFont("meera", 50)
-            text_block = text_font.render(text, True, Color.RED.rgb())
-            text_rect = text_block.get_rect(center=(self.WINDOW_WIDTH/2, 50))
-            screen.blit(text_block, text_rect)
-
-            turn_text = "Turn: " + str(game.current_turn)
-            turn_font = pygame.font.SysFont("meera", 30)
-            turn_block = turn_font.render(turn_text, True, Color.BLACK.rgb())
-            screen.blit(turn_block, (30, 30))
-
-            # Update de full display
-            pygame.display.flip()
-
-            # Limit fps
-            time.sleep(0.6)
-        
-        # Done! Time to quit.
-        pygame.quit()
-        return
 
     def string_representation(self, game: SCS_Game) -> str:
         string = ""

@@ -14,7 +14,7 @@ dependencies = [
     "torch~=2.0",
     "PyYAML~=6.0",
     "termcolor~=2.0",
-    "pygame~=2.1",
+    "pygame-ce~=2.5",
     "gymnasium~=1.1",
     "pettingzoo~=1.25",
 ]
@@ -23,13 +23,14 @@ dependencies = [
 name = "rl_scs"
 
 [dependency-groups]
-test = [
+dev = [
     "pytest~=7.4",
     "pytest-cov~=4.1",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["test"]
+pythonpath = ["src"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
