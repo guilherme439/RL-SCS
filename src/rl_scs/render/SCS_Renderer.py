@@ -317,8 +317,8 @@ class SCS_Renderer:
         height_to_width_ratio = 1.1547005
         width_to_height_ratio = 0.8660254
 
-        GAME_ROWS = game.getBoardRows()
-        GAME_COLS = game.getBoardColumns()
+        GAME_ROWS = game.get_board_rows()
+        GAME_COLS = game.get_board_columns()
 
         # values in pixels
         tile_border_thickness = 3

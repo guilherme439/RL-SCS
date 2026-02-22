@@ -320,10 +320,10 @@ class SCS_Game(AECEnv):
     def get_board(self):
         return self.board
     
-    def getBoardColumns(self):
+    def get_board_columns(self):
         return self.columns
 
-    def getBoardRows(self):
+    def get_board_rows(self):
         return self.rows    
 
     def get_agent_name(self, player: int) -> str:
